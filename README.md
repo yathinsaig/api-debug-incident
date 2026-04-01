@@ -1,3 +1,12 @@
+---
+title: API Incident Debugger
+emoji: 🔧
+colorFrom: blue
+colorTo: red
+sdk: docker
+pinned: false
+---
+
 # API Integration Incident Debugger — OpenEnv Environment
 
 A real-world OpenEnv-compliant benchmark where an AI agent debugs broken API
