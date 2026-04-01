@@ -1,0 +1,141 @@
+name: api-integration-incident-debugger
+version: "1.0.0"
+description: >
+  A stateful environment where an AI agent debugs broken API integrations
+  by reading error logs, making targeted test calls to a mock server, and
+  patching request configuration. Rewards efficient fault isolation over
+  blind trial-and-error. Simulates the real-world pain point of production
+  API outages — one of the most common and costly developer workflows.
+
+domain: developer-tools
+tags:
+  - openenv
+  - api-debugging
+  - developer-tools
+  - fault-isolation
+  - site-reliability
+
+author: API Debug Env
+license: MIT
+
+tasks:
+  - id: 0
+    name: Missing auth header
+    difficulty: easy
+    description: >
+      The API call omits the Authorization header entirely.
+      Agent must identify the missing header from logs and patch it.
+    max_steps: 10
+    faults: [MISSING_AUTH_HEADER]
+    expected_baseline_score: 0.78
+
+  - id: 1
+    name: Malformed payload — missing field + wrong type
+    difficulty: medium
+    description: >
+      POST body sends user_id as a string instead of integer,
+      and the required email field is absent. Two faults to fix.
+    max_steps: 15
+    faults: [INVALID_PAYLOAD_FIELD, WRONG_FIELD_TYPE]
+    expected_baseline_score: 0.61
+
+  - id: 2
+    name: Multi-fault with noisy logs
+    difficulty: hard
+    description: >
+      Three simultaneous faults: expired Bearer token, deprecated
+      /v1/users endpoint (must use /v2/users), and missing required
+      body field. Logs contain ~40% irrelevant noise lines.
+    max_steps: 20
+    faults: [EXPIRED_TOKEN, DEPRECATED_ENDPOINT, INVALID_PAYLOAD_FIELD]
+    expected_baseline_score: 0.39
+
+observation_space:
+  type: structured
+  fields:
+    - name: request
+      type: object
+      description: "Current API request (endpoint, method, headers, body, base_url)"
+    - name: response
+      type: object
+      description: "Last HTTP response (status_code, body, error_message, latency_ms)"
+    - name: logs
+      type: list[str]
+      description: "Last 20 log lines; hard mode includes noisy irrelevant lines"
+    - name: step_count
+      type: int
+      description: "Steps taken so far in this episode"
+    - name: action_history
+      type: list[str]
+      description: "List of action_type strings in order taken"
+    - name: budget_remaining
+      type: int
+      description: "Steps remaining before episode terminates by budget"
+
+action_space:
+  type: discrete_parameterised
+  actions:
+    - name: inspect_logs
+      description: "Read the current log lines carefully"
+      parameters: {}
+    - name: analyze_response
+      description: "Analyse the HTTP status code and error message"
+      parameters: {}
+    - name: make_test_call
+      description: "Send a test HTTP request to the mock server"
+      parameters:
+        endpoint: str
+        method: str
+        headers: dict
+        body: dict
+        base_url: str
+    - name: patch_config
+      description: "Change a header or base_url config value"
+      parameters:
+        key: str
+        value: str
+    - name: patch_request
+      description: "Modify endpoint, method, or body field"
+      parameters:
+        field: str    # e.g. "endpoint", "body.user_id", "headers.Authorization"
+        value: any
+    - name: submit_fix
+      description: "Declare fix complete — triggers final validation call"
+      parameters: {}
+
+reward_range: [-5.0, 3.0]
+
+reward_components:
+  step_penalty: -0.05
+  inspect_logs_quality: +0.10
+  analyze_response_quality: +0.10
+  make_test_call_base: -0.05
+  new_error_type_discovered: +0.15
+  per_fault_resolved: +0.30
+  submit_fix_success: +1.50
+  efficiency_bonus: "+0.50 * (1 - steps/max_steps)"
+  premature_submit_penalty: -0.20
+  repeated_action_penalty: -0.10
+
+grader:
+  class: APIDebugGrader
+  file: grader.py
+  score_range: [0.0, 1.0]
+  components:
+    success: 0.50
+    efficiency: 0.25
+    reasoning: 0.25
+
+baseline:
+  model: llama3-70b-8192
+  provider: groq
+  file: baseline.py
+  scores:
+    easy: 0.78
+    medium: 0.61
+    hard: 0.39
+
+environment:
+  python: ">=3.10"
+  mock_server: FastAPI on localhost:8765
+  http_client: httpx
