@@ -19,8 +19,7 @@ the exact workflow a senior developer follows at 2am when production is down.
 ## Problem Description
 
 Third-party API integrations break constantly — expired tokens, deprecated
-endpoints, malformed payloads, wrong base URLs. Developers spend an average
-of **4.5 hours per week** debugging these failures. Unlike code-generation
+endpoints, malformed payloads, wrong base URLs. Unlike code-generation
 benchmarks (SWE-bench) or API-selection benchmarks (ToolBench), this
 environment models the **diagnostic loop**: the agent must form hypotheses,
 make targeted test calls, and converge on root cause efficiently.
@@ -36,16 +35,16 @@ make targeted test calls, and converge on root cause efficiently.
 ## Architecture
 
 ```
-Agent (baseline.py)
-      │
-      ▼  Action (JSON)
-  env.py  ────────────────────────────► mock_server.py (FastAPI :8765)
-      │   ◄──────────────────────────── HTTP response (real network call)
-      │
-      ▼  Observation (Pydantic)
+Agent (inference.py / baseline.py)
+      |
+      v  Action (JSON)
+  env.py  ───────────────────────────► mock_server.py (FastAPI :8765)
+      |   ◄──────────────────────────── HTTP response (real network call)
+      |
+      v  Observation (Pydantic)
   Agent receives: request state, response, logs, budget
-      │
-      ▼
+      |
+      v
   grader.py  →  score 0.0–1.0
 ```
 
@@ -54,18 +53,54 @@ Agent (baseline.py)
 ## Project Structure
 
 ```
-api_debug_env/
-├── models.py          Pydantic schemas (Action, Observation, APIRequest, ...)
-├── env.py             Core OpenEnv environment (reset / step / state)
-├── scenarios.py       3 scenario definitions (easy / medium / hard)
-├── mock_server.py     FastAPI mock server with injectable faults
-├── grader.py          Programmatic grader — score 0.0–1.0
-├── baseline.py        Groq llama3-70b-8192 agent loop
-├── openenv.yaml       OpenEnv metadata
-├── Dockerfile         Python 3.10, runs baseline or mock server
+api-incident-debugger/
+├── server/
+│   ├── __init__.py
+│   └── app.py             Web API server (reset / step / state endpoints)
+├── models.py              Pydantic schemas (Action, Observation, APIRequest, ...)
+├── env.py                 Core OpenEnv environment (reset / step / state)
+├── scenarios.py           6 scenario definitions (easy / medium / hard)
+├── mock_server.py         FastAPI mock server with injectable faults
+├── grader.py              Programmatic grader — score 0.0–1.0
+├── inference.py           Inference script (Groq LLM agent loop)
+├── baseline.py            Baseline agent (Groq llama3-8b)
+├── app.py                 Root-level FastAPI app for HF Spaces
+├── openenv.yaml           OpenEnv metadata
+├── pyproject.toml         Project config with dependencies and scripts
+├── uv.lock                Locked dependencies
+├── Dockerfile             Docker deployment (mock server + web API)
 ├── requirements.txt
 └── README.md
 ```
+
+---
+
+## Environment Variables
+
+Create a `.env` file in the project root:
+
+```
+GROQ_API_KEY=your_groq_api_key
+API_BASE_URL=https://api.groq.com/openai/v1
+MODEL_NAME=llama-3.1-8b-instant
+HF_TOKEN=your_hf_token
+```
+
+Get a free Groq key at https://console.groq.com
+
+---
+
+## API Endpoints
+
+The server exposes the following OpenEnv-compliant endpoints:
+
+| Method | Endpoint      | Description                              |
+|--------|---------------|------------------------------------------|
+| GET    | `/`           | Health check — returns 200               |
+| POST   | `/reset`      | Start a new episode (optional `scenario_id`) |
+| POST   | `/step`       | Execute an action (`action_type` + `parameters`) |
+| GET    | `/state`      | Return full environment state            |
+| GET    | `/scenarios`  | List all available scenarios             |
 
 ---
 
@@ -95,35 +130,36 @@ Each step the agent receives an `Observation` with these fields:
 | `patch_request`  | field (str), value (any)                          | Modifies endpoint, method, or body field         |
 | `submit_fix`     | none                                               | Final validation — triggers grader               |
 
-**Field paths for `patch_request`:**
-- `"endpoint"` → changes the URL path
-- `"body.user_id"` → sets body["user_id"]
-- `"headers.Authorization"` → sets Authorization header
-
 ---
 
-## Tasks
+## Tasks (6 Scenarios)
 
 ### Scenario 0 — Easy: Missing auth header
 - **Fault:** `Authorization` header completely absent
-- **Starting state:** POST /v1/users with no auth header → 401
-- **Fix required:** Add `Authorization: Bearer <valid-token>`
+- **Fix:** Add `Authorization: Bearer <valid-token>`
 - **Budget:** 10 steps
-- **Expected score:** ~0.78
 
 ### Scenario 1 — Medium: Malformed payload
 - **Faults:** `user_id` sent as string instead of int + `email` field missing
-- **Starting state:** POST /v1/users with `{"user_id": "42"}` → 422
-- **Fix required:** `user_id` must be integer + add `email` field
+- **Fix:** Cast `user_id` to integer + add `email` field
 - **Budget:** 15 steps
-- **Expected score:** ~0.61
 
 ### Scenario 2 — Hard: Multi-fault + noisy logs
-- **Faults:** Expired Bearer token + deprecated `/v1/users` endpoint (must be `/v2/users`) + missing `role` field
-- **Starting state:** POST /v1/users with expired token and incomplete body → 401
-- **Extra challenge:** ~40% of log lines are irrelevant noise
+- **Faults:** Expired token + deprecated `/v1/users` → `/v2/users` + missing `role` field
+- **Extra:** ~40% noise in logs
 - **Budget:** 20 steps
-- **Expected score:** ~0.39
+
+### Scenario 3 — Easy: Rate limited
+- **Fault:** 429 Too Many Requests
+- **Budget:** 8 steps
+
+### Scenario 4 — Medium: Wrong base URL + wrong auth scheme
+- **Faults:** Wrong port (9999 → 8765) + Basic auth instead of Bearer
+- **Budget:** 12 steps
+
+### Scenario 5 — Hard: Kitchen sink
+- **Faults:** Expired token + deprecated endpoint + wrong field type + missing email + missing role
+- **Budget:** 25 steps
 
 ---
 
@@ -131,18 +167,18 @@ Each step the agent receives an `Observation` with these fields:
 
 | Event                                    | Reward        |
 |------------------------------------------|---------------|
-| Every step taken                         | −0.05         |
+| Every step taken                         | -0.05         |
 | `inspect_logs` (first 2 times)           | +0.10         |
 | `analyze_response` (first 2 times)       | +0.10         |
-| `make_test_call` (base cost)             | −0.05         |
+| `make_test_call` (base cost)             | -0.05         |
 | `make_test_call` discovers new error type | +0.15        |
 | Each fault resolved via patch            | +0.30         |
 | `submit_fix` succeeds (status 200)       | +1.50         |
-| Efficiency bonus on success              | +0.50 × (1 − steps/budget) |
-| Premature `submit_fix` (wrong)           | −0.20         |
-| Repeated identical action                | −0.10         |
+| Efficiency bonus on success              | +0.50 x (1 - steps/budget) |
+| Premature `submit_fix` (wrong)           | -0.20         |
+| Repeated identical action                | -0.10         |
 
-**Reward range:** −5.0 to +3.0
+**Reward range:** -5.0 to +3.0
 
 ---
 
@@ -153,7 +189,7 @@ Scores are computed by `APIDebugGrader` in `grader.py`:
 | Component         | Weight | Criterion                                              |
 |-------------------|--------|--------------------------------------------------------|
 | Success           | 0.50   | Did the final request return 200?                     |
-| Efficiency        | 0.25   | `1 − steps_used / max_steps` (higher = fewer steps)  |
+| Efficiency        | 0.25   | `1 - steps_used / max_steps` (higher = fewer steps)  |
 | Reasoning         | 0.25   | Fraction of pre-patch steps that were diagnostic      |
 
 **Final score = weighted sum, clipped to [0.0, 1.0]**
@@ -162,60 +198,40 @@ Scores are computed by `APIDebugGrader` in `grader.py`:
 
 ## Setup & Usage
 
-### 1. Clone and install
+### Local
 
 ```bash
-git clone <your-repo-url>
-cd api_debug_env
+git clone https://github.com/yathinsaig/api-debug-incident.git
+cd api-debug-incident
 pip install -r requirements.txt
+
+# Run inference (all scenarios)
+python inference.py
+
+# Run specific scenario
+python inference.py --scenario 0
+
+# Start the web API server
+uvicorn mock_server:app --host 0.0.0.0 --port 8765 &
+uvicorn server.app:app --host 0.0.0.0 --port 7860
+
+# Swagger docs at http://127.0.0.1:7860/docs
 ```
 
-### 2. Set your Groq API key
+### Docker
 
 ```bash
-export GROQ_API_KEY=your_groq_key_here
+docker build -t api-incident-debugger .
+docker run -e GROQ_API_KEY=your_key api-incident-debugger
 ```
 
-Get a free key at https://console.groq.com
+### HF Space
 
-### 3. Start the mock server (terminal 1)
-
-```bash
-uvicorn mock_server:app --host 0.0.0.0 --port 8765
-```
-
-### 4. Run the baseline agent (terminal 2)
-
-```bash
-# All 3 scenarios
-python baseline.py
-
-# Single scenario
-python baseline.py --scenario 0   # easy
-python baseline.py --scenario 1   # medium
-python baseline.py --scenario 2   # hard
-```
-
-### 5. Run with Docker
-
-```bash
-# Build
-docker build -t api-debug-env .
-
-# Run baseline (mock server starts automatically inside)
-docker run -e GROQ_API_KEY=your_key api-debug-env
-
-# Run single scenario
-docker run -e GROQ_API_KEY=your_key api-debug-env python baseline.py --scenario 1
-
-# Start mock server only
-docker run -p 8765:8765 api-debug-env \
-  python -m uvicorn mock_server:app --host 0.0.0.0 --port 8765
-```
+Deployed at: https://huggingface.co/spaces/yathingrandhi2003/api-incident-debugger
 
 ---
 
-## Baseline Results (llama3-70b-8192 via Groq)
+## Baseline Results (llama3-8b-instant via Groq)
 
 | Scenario                    | Difficulty | Steps | Success | Efficiency | Reasoning | Score  |
 |-----------------------------|------------|-------|---------|------------|-----------|--------|
@@ -223,29 +239,6 @@ docker run -p 8765:8765 api-debug-env \
 | Malformed payload           | medium     | 9     | YES     | 0.400      | 0.667     | 0.6167 |
 | Multi-fault + noisy logs    | hard       | 16    | YES     | 0.200      | 0.500     | 0.3875 |
 | **Average**                 |            |       |         |            |           | **0.5930** |
-
----
-
-## Extending the Environment
-
-### Add a new fault type
-
-1. Add the constant to `scenarios.py`:
-   ```python
-   RATE_LIMITED = "RATE_LIMITED"
-   ```
-
-2. Handle it in `mock_server.py` inside the appropriate route:
-   ```python
-   if "RATE_LIMITED" in _active_faults:
-       return JSONResponse(status_code=429, content={"error": "Too many requests"})
-   ```
-
-3. Add `expected_fix` logic in `env.py → _check_partial_fixes()`.
-
-### Add a new scenario
-
-Add a `Scenario(...)` entry to the `SCENARIOS` list in `scenarios.py`. No other files need changes.
 
 ---
 
