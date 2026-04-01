@@ -14,7 +14,6 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import FastAPI
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from env import APIDebugEnv
@@ -48,7 +47,7 @@ def root():
 
 
 @app.post("/reset")
-def reset(req: ResetRequest):
+def reset(req: ResetRequest = ResetRequest()):
     obs = env.reset(scenario_id=req.scenario_id)
     return obs.model_dump()
 
