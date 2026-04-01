@@ -7,4 +7,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-CMD ["bash", "-c", "uvicorn mock_server:app --host 0.0.0.0 --port 8765 --log-level error & sleep 2 && python baseline.py"]
+EXPOSE 7860
+
+CMD ["bash", "-c", "uvicorn mock_server:app --host 0.0.0.0 --port 8765 --log-level error & sleep 2 && uvicorn app:app --host 0.0.0.0 --port 7860"]

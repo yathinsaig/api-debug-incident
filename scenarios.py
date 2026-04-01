@@ -89,69 +89,69 @@ SCENARIOS: list[Scenario] = [
     # ------------------------------------------------------------------
     # Scenario 1 — MEDIUM
     # ------------------------------------------------------------------
-    # Scenario(
-    #     id=1,
-    #     name="Malformed payload — missing field + wrong type",
-    #     difficulty="medium",
-    #     description=(
-    #         "POST /v1/users returns 422. Two payload faults: (1) 'user_id' is "
-    #         "sent as a string '42' instead of integer 42, and (2) the required "
-    #         "'email' field is absent from the request body. Both must be fixed."
-    #     ),
-    #     faults_injected=[INVALID_PAYLOAD_FIELD, WRONG_FIELD_TYPE],
-    #     initial_request={
-    #         "endpoint": "/v1/users",
-    #         "method": "POST",
-    #         "headers": {
-    #             "Content-Type": "application/json",
-    #             "Authorization": "Bearer valid-token-abc",
-    #         },
-    #         "body": {"user_id": "42"},   # string instead of int, email missing
-    #         "base_url": "http://localhost:8765",
-    #     },
-    #     expected_fix={
-    #         "body.user_id": 42,                        # must be integer
-    #         "body.email": "",                          # any non-empty string
-    #     },
-    #     max_steps=15,
-    #     noisy_logs=False,
-    #     hint="[HINT] The frontend team recently changed how form data is serialised.",
-    # ),
+    Scenario(
+        id=1,
+        name="Malformed payload — missing field + wrong type",
+        difficulty="medium",
+        description=(
+            "POST /v1/users returns 422. Two payload faults: (1) 'user_id' is "
+            "sent as a string '42' instead of integer 42, and (2) the required "
+            "'email' field is absent from the request body. Both must be fixed."
+        ),
+        faults_injected=[INVALID_PAYLOAD_FIELD, WRONG_FIELD_TYPE],
+        initial_request={
+            "endpoint": "/v1/users",
+            "method": "POST",
+            "headers": {
+                "Content-Type": "application/json",
+                "Authorization": "Bearer valid-token-abc",
+            },
+            "body": {"user_id": "42"},   # string instead of int, email missing
+            "base_url": "http://localhost:8765",
+        },
+        expected_fix={
+            "body.user_id": 42,                        # must be integer
+            "body.email": "",                          # any non-empty string
+        },
+        max_steps=15,
+        noisy_logs=False,
+        hint="[HINT] The frontend team recently changed how form data is serialised.",
+    ),
 
     # ------------------------------------------------------------------
     # Scenario 2 — HARD
     # ------------------------------------------------------------------
-    # Scenario(
-    #     id=2,
-    #     name="Multi-fault: expired token + deprecated endpoint + missing field + noisy logs",
-    #     difficulty="hard",
-    #     description=(
-    #         "Production broke after a v1→v2 API migration. Three faults: "
-    #         "(1) the Bearer token is expired, (2) the endpoint is still pointing "
-    #         "to /v1/users which is deprecated — must be /v2/users, and (3) the "
-    #         "body is missing the required 'role' field. Logs contain ~40% noise "
-    #         "(unrelated timeout warnings and irrelevant stack traces)."
-    #     ),
-    #     faults_injected=[EXPIRED_TOKEN, DEPRECATED_ENDPOINT, INVALID_PAYLOAD_FIELD],
-    #     initial_request={
-    #         "endpoint": "/v1/users",          # must be changed to /v2/users
-    #         "method": "POST",
-    #         "headers": {
-    #             "Content-Type": "application/json",
-    #             "Authorization": "Bearer expired-token-xyz",   # expired
-    #         },
-    #         "body": {"user_id": 99, "email": "bob@example.com"},   # missing 'role'
-    #         "base_url": "http://localhost:8765",
-    #     },
-    #     expected_fix={
-    #         "headers.Authorization": "Bearer ",   # must START with "Bearer " and not contain "expired"
-    #         "endpoint": "/v2/users",
-    #         "body.role": "",                       # any non-empty string
-    #     },
-    #     max_steps=20,
-    #     noisy_logs=True,
-    #     hint="[HINT] The v2 migration doc was published last Tuesday. Check the changelog.",
-    # ),
+    Scenario(
+        id=2,
+        name="Multi-fault: expired token + deprecated endpoint + missing field + noisy logs",
+        difficulty="hard",
+        description=(
+            "Production broke after a v1→v2 API migration. Three faults: "
+            "(1) the Bearer token is expired, (2) the endpoint is still pointing "
+            "to /v1/users which is deprecated — must be /v2/users, and (3) the "
+            "body is missing the required 'role' field. Logs contain ~40% noise "
+            "(unrelated timeout warnings and irrelevant stack traces)."
+        ),
+        faults_injected=[EXPIRED_TOKEN, DEPRECATED_ENDPOINT, INVALID_PAYLOAD_FIELD],
+        initial_request={
+            "endpoint": "/v1/users",          # must be changed to /v2/users
+            "method": "POST",
+            "headers": {
+                "Content-Type": "application/json",
+                "Authorization": "Bearer expired-token-xyz",   # expired
+            },
+            "body": {"user_id": 99, "email": "bob@example.com"},   # missing 'role'
+            "base_url": "http://localhost:8765",
+        },
+        expected_fix={
+            "headers.Authorization": "Bearer ",   # must START with "Bearer " and not contain "expired"
+            "endpoint": "/v2/users",
+            "body.role": "",                       # any non-empty string
+        },
+        max_steps=20,
+        noisy_logs=True,
+        hint="[HINT] The v2 migration doc was published last Tuesday. Check the changelog.",
+    ),
     # ------------------------------------------------------------------
     # Scenario 3 — EASY: Rate limited
     # ------------------------------------------------------------------
