@@ -39,9 +39,14 @@ from openai import OpenAI
 # Environment variables
 # ---------------------------------------------------------------------------
 
-API_KEY = os.getenv("GROQ_API_KEY") or os.getenv("HF_TOKEN") or os.getenv("API_KEY")
 API_BASE_URL = os.getenv("API_BASE_URL", "https://api.groq.com/openai/v1")
 MODEL_NAME = os.getenv("MODEL_NAME", "llama-3.1-8b-instant")
+HF_TOKEN = os.getenv("HF_TOKEN")
+
+# Optional — if you use from_docker_image():
+LOCAL_IMAGE_NAME = os.getenv("LOCAL_IMAGE_NAME")
+
+API_KEY = os.getenv("GROQ_API_KEY") or HF_TOKEN or os.getenv("API_KEY")
 ENV_URL = os.getenv("ENV_URL", "http://localhost:7860").rstrip("/")
 BENCHMARK = "api-incident-debugger"
 
